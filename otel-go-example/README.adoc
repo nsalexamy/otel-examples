@@ -1,0 +1,76 @@
+= OpenTelemetry Go Example
+
+This repository contains an example of how to use OpenTelemetry with a Go application. It demonstrates how to set up tracing and metrics collection using OpenTelemetry libraries.
+
+== Initial Setup
+
+To set up the example application, you will need to install the necessary Go packages. You can do this by running the following commands:
+
+[source,shell]
+----
+$ go mod init otel-go-example
+----
+
+
+== Packages Used
+
+The example application uses the following OpenTelemetry packages:
+
+[source,shell]
+----
+# Go core
+$ go get log
+$ go get fmt
+$ go get os
+$ go get net/http
+
+# Go Web Framework
+$ go get github.com/gin-contrib/cors
+$ go get github.com/gin-gonic/gin
+
+# Logging
+$ go get github.com/sirupsen/logrus
+
+# Go OpenTelemetry SDK
+$ go get go.opentelemetry.io/otel
+----
+
+
+== Getting Started
+
+To get started with this example, you will need to have Go installed on your machine. You can download and install Go from the official website: https://golang.org/dl/
+
+Once you have Go installed, you can clone this repository and run the example:
+
+----
+git clone https://github.com/yourusername/otel-go-example.git
+cd otel-go-example
+go run cmd/main.go
+----
+
+== Making Requests
+
+You can make requests to the example application using curl or any HTTP client. For example, to make a GET request to the `/hello` endpoint, you can run:
+
+[source,shell]
+----
+#$ curl -H "X-B3-TraceId: 1234567890abcdef1234567890abcdef" -H "X-B3-SpanId: 1234567890abcdef" "http://localhost:8080/logging?level=info"
+
+$ curl -H "traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01" "http://localhost:8080/logging?level=info"
+
+$ curl -H "traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01" "http://localhost:8080/sleep?duration=2s"
+----
+
+== Configuration
+
+The example application is configured to send traces and metrics to a local OpenTelemetry Collector. You can customize the configuration by modifying the `config.yaml` file.
+
+[source,yaml]
+----
+otel:
+  service:
+    name: otel-go-example
+  exporter:
+    otlp:
+      endpoint: localhost:4317
+----      
