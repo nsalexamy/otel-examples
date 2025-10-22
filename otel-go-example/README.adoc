@@ -61,16 +61,3 @@ $ curl -H "traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01"
 $ curl -H "traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01" "http://localhost:8080/sleep?duration=2s"
 ----
 
-== Configuration
-
-The example application is configured to send traces and metrics to a local OpenTelemetry Collector. You can customize the configuration by modifying the `config.yaml` file.
-
-[source,yaml]
-----
-otel:
-  service:
-    name: otel-go-example
-  exporter:
-    otlp:
-      endpoint: localhost:4317
-----      
