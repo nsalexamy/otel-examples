@@ -1,0 +1,5 @@
+namespace: o11y
+resources:
+ - otel-go-example-deployment.yaml
+ - otel-go-example-service.yaml
+ - otel-go-example-ingress.yaml

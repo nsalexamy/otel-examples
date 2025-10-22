@@ -1,0 +1,339 @@
+= Development Guide for otel-go-example
+
+:toc:
+:toclevels: 3
+:sectnums:
+:sectnumlevels: 3
+:source-highlighter: rouge
+:rouge-style: github
+:rouge-linenums-mode: inline
+
+:imagesdir: images
+
+[.img-wide]
+image::intro.png[]
+
+== Introduction
+
+This guide explains how to implement trace context propagation, configure the OpenTelemetry SDK, and set up exporters in a Go application.
+
+The primary objective is to show how to extract OpenTelemetry trace context from incoming HTTP headers and use it in application logs—enabling seamless correlation between logs and traces using trace_id and span_id.
+
+.Expected Log Output
+[source,json,indent=0,pretty-print]
+----
+{
+  "level": "info",
+  "msg": "Sleep handler called",
+  "span_id": "1234567890abcdef",
+  "time": "2025-10-21T22:40:45-07:00",
+  "trace_id": "1234567890abcdef1234567890abcdef"
+}
+----
+
+=== Useful Resources
+
+	•	Source Code: https://github.com/nsalexamy/otel-examples/tree/main/otel-go-example
+	•	YouTube - Correlating Logs and Traces in Go Using OpenTelemetry: https://www.youtube.com/watch?v=4Gr3XMwWxf8
+	•	YouTube - Traefik Trace Context Propagation: https://www.youtube.com/watch?v=4Gr3XMwWxf8&t=149s
+
+== OpenTelemetry eBPF Instrumentation (OBI)
+
+For compiled languages like Go, OpenTelemetry offers eBPF-based instrumentation to capture telemetry data without modifying application code. However, OBI does not natively support HTTP trace context propagation, which is required for trace/log correlation in Go applications.
+
+== Understanding Trace Context Propagation
+
+To support distributed tracing, requests must propagate context using the W3C Trace Context specification.
+
+- https://www.w3.org/TR/trace-context/
+
+Go applications expect the traceparent HTTP header in the following format:
+
+traceparent: {version}-{trace-id}-{span-id}-{trace-flags}
+
+Example:
+
+traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+
+- *version*: 00
+- *trace-id*: 0af7651916cd43dd8448eb211c80319c
+- *span-id*: b7ad6b7169203331
+- *trace-flags*: 01
+
+== Configuring Traefik for Trace Context Propagation
+
+When using Traefik as a reverse proxy, you can enable trace context propagation by forwarding the traceparent header to backend services.
+
+If Traefik is configured with tracing enabled, it automatically handles traceparent forwarding. Here’s an example of a dynamic configuration in YAML:
+
+.custom-values.yaml
+[source,yaml]
+----
+tracing:
+  addInternals: true
+
+  otlp:
+    enabled: true
+    http:
+      enabled: true
+      endpoint: http://otel-collector.o11y.svc.cluster.local:4318
+      insecure: true
+----
+
+If an incoming request includes a traceparent header, Traefik will forward it to the Go backend. Otherwise, it will generate a new trace context.
+
+
+== OOpenTelemetry Libraries in This Example
+
+=== Required Packages
+
+The following packages are used:
+
+==== OpenTelemetry SDK for Go
+
+[source,shell]
+----
+$ go get go.opentelemetry.io/otel
+----
+
+==== Logrus for structured logging in JSON
+
+[source,shell]
+----
+$ go get github.com/sirupsen/logrus
+----
+
+=== middleware.go - Trace Context Extraction
+
+This file contains middleware that extracts the OpenTelemetry trace context from HTTP headers.
+
+.middleware.go
+[source,go]
+----
+package logger
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/propagation"
+)
+
+// Global propagator for W3C Trace Context (traceparent, tracestate)
+var Propagator = propagation.TraceContext{}
+
+// ExtractContext extracts any incoming OpenTelemetry trace context
+// (e.g., from OBI, upstream services, or gateways) from HTTP headers.
+func ExtractContext(r *http.Request) context.Context {
+
+	return Propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+}
+
+func Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Extract context from request headers (from OBI or upstream)
+		ctx := ExtractContext(c.Request)
+
+		// Replace the request context so downstream handlers use it
+		c.Request = c.Request.WithContext(ctx)
+
+		c.Next()
+	}
+}
+----
+
+
+
+=== main.go - Registering Middleware
+
+In main.go, the middleware is added to extract trace context from incoming requests.
+
+.main.go
+[source,go]
+----
+
+func main() {
+
+	logger.Init()
+
+	// SERVER_ADDR is the address the server listens on. from environment variable or default to ":8080"
+	var serverAddr = os.Getenv("SERVER_ADDR")
+
+	if serverAddr == "" {
+		serverAddr = ":8080"
+	}
+
+	logger.Info(context.Background(), "Starting server", map[string]interface{}{
+		"server_addr": serverAddr,
+	})
+
+	r := gin.Default()
+
+    // Use the logger middleware to extract trace context from incoming requests
+	r.Use(logger.Middleware())
+
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ok",
+		})
+	})
+
+	r.GET("/ready", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "ready",
+		})
+	})
+
+	exampleGroup := r.Group("/")
+	example.RegisterHandlers(exampleGroup)
+
+	r.Run(serverAddr)
+}
+
+----
+
+=== logger.go - Logging with Trace Context
+
+This file initializes a JSON-formatted logger and includes functions to log messages with trace IDs.
+
+.logger.go
+[source,go]
+----
+package logger
+
+import (
+	"context"
+
+	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var _logger = logrus.New()
+
+func Init() {
+	_logger.SetFormatter(&logrus.JSONFormatter{})
+	_logger.SetLevel(logrus.InfoLevel)
+}
+
+
+// Info logs a message with trace_id and span_id from context
+func Info(ctx context.Context, msg string, fields ...logrus.Fields) {
+	entry := _logger.WithFields(extractTraceFields(ctx))
+	if len(fields) > 0 {
+		for k, v := range fields[0] {
+			entry = entry.WithField(k, v)
+		}
+	}
+	entry.Info(msg)
+}
+
+// Error logs an error message with trace context
+func Error(ctx context.Context, msg string, err error) {
+	_logger.WithFields(extractTraceFields(ctx)).WithError(err).Error(msg)
+}
+
+// extractTraceFields pulls trace_id/span_id from context
+func extractTraceFields(ctx context.Context) logrus.Fields {
+	sc := trace.SpanContextFromContext(ctx)
+
+	if !sc.IsValid() {
+		return logrus.Fields{}
+	}
+	return logrus.Fields{
+		"trace_id": sc.TraceID().String(),
+		"span_id":  sc.SpanID().String(),
+	}
+}
+----
+
+The extractTraceFields function retrieves the trace_id and span_id from the context and includes them in the log entries.
+
+
+=== Handers - Logging with Trace Context
+
+The /sleep endpoint uses the logger to log messages with trace context.
+
+.handler.go
+[source,go]
+----
+func RegisterHandlers(router *gin.RouterGroup) {
+    // other handlers...
+
+	router.GET("/sleep", Sleep)
+}
+----
+
+
+.sleep.go
+[source,go]
+----
+package example
+
+import (
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/nsalexamy/otel-examples/otel-go-example/internal/logger"
+)
+
+func Sleep(c *gin.Context) {
+	// get duration from query parameter, default to 1s
+	durationStr := c.DefaultQuery("duration", "1s")
+	logger.Info(c.Request.Context(), "Sleep handler called", map[string]interface{}{
+		"duration": durationStr,
+	})
+
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		logger.Error(c.Request.Context(), "Failed to parse duration", err)
+		c.JSON(400, gin.H{"error": "Invalid duration"})
+		return
+	}
+
+	// simulate work
+	time.Sleep(duration)
+	logger.Info(c.Request.Context(), "Finished sleeping", map[string]interface{}{
+		"duration": durationStr,
+	})
+
+	c.JSON(200, gin.H{"message": "Slept for " + duration.String()})
+}
+----
+
+You can see that the logger.Info and logger.Error functions are called with c.Request.Context(), which contains the extracted trace context.
+
+
+== Run the Example
+
+Make sure you have Go installed and the dependencies downloaded. Run the application using:
+
+[source,shell]
+----
+$ go run cmd/main.go
+----
+
+== Making Requests
+
+You can simulate a trace-enabled request like this:
+
+[source,shell]
+----
+$ curl -H "traceparent: 00-1234567890abcdef1234567890abcdef-1234567890abcdef-01" "http://localhost:8080/sleep?duration=2s"
+----
+
+If Traefik is properly configured, it will add the traceparent header automatically. Here, we simulate it manually for testing purposes.
+
+== Sample Logs
+
+The application will output logs like the following:
+[source,json]
+----
+{"duration":"2s","level":"info","msg":"Sleep handler called","span_id":"1234567890abcdef","time":"2025-10-21T22:40:45-07:00","trace_id":"1234567890abcdef1234567890abcdef"}
+{"duration":"2s","level":"info","msg":"Finished sleeping","span_id":"1234567890abcdef","time":"2025-10-21T22:40:47-07:00","trace_id":"1234567890abcdef1234567890abcdef"}
+----
+
+== Conclusion
+
+This guide demonstrated how to extract and propagate OpenTelemetry trace context in a Go application. Using a middleware and structured logging, trace identifiers are captured and logged, enabling full visibility into distributed request flows and improving observability.
+

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-go-example
+  labels:
+    provider: service-foundry  
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-go-example
+  template:
+    metadata:
+      labels:
+        app: otel-go-example
+        instrument: obi
+    spec:
+#      nodeSelector:
+#        agentpool: agentpool
+      containers:
+        - name: otel-go-example
+          image: docker.io/credemol/otel-go-example:0.1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+
+          startupProbe:
+            httpGet:  
+              path: /health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 5
+#          envFrom:
+#            - configMapRef:
+#                name: my-config
+#          env:
+#            - name: JAVA_OPTS
+#              value: "-XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap"
+
+ 
