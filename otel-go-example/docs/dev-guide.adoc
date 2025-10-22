@@ -83,7 +83,7 @@ tracing:
 If an incoming request includes a traceparent header, Traefik will forward it to the Go backend. Otherwise, it will generate a new trace context.
 
 
-== OOpenTelemetry Libraries in This Example
+== OpenTelemetry Libraries in This Example
 
 === Required Packages
 
