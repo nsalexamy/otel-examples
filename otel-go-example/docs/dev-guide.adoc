@@ -31,6 +31,10 @@ The primary objective is to show how to extract OpenTelemetry trace context from
 }
 ----
 
+=== YouTube version of this Guide
+
+Watch the video walkthrough of this guide on YouTube: https://youtu.be/22yjVXekgUQ
+
 === Useful Resources
 
 	•	Source Code: https://github.com/nsalexamy/otel-examples/tree/main/otel-go-example
